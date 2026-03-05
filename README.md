@@ -14,7 +14,7 @@ An OpenClaw skill that connects to a Meshtastic LoRa device via USB to receive `
 ## Architecture
 
 ```
-Remote Sensor Device              Host Machine (macOS)
+Remote Sensor Device              Host Machine (macOS/Linux)
 [GPIO Detection Sensor]           [Meshtastic Module via USB]
         |                                  |
         | LoRa radio                  usb_receiver.py (daemon)
