@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.meshtastic.detection</string>
+
+    <!-- Change these paths to match your setup -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/CHANGE_ME/meshtastic-detection/venv/bin/python</string>
+        <string>scripts/usb_receiver.py</string>
+        <string>--port</string>
+        <string>/dev/cu.usbmodem14101</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/CHANGE_ME/meshtastic-detection</string>
+
+    <!-- Start automatically when loaded / on login -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart on crash (but not on clean exit) -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- Min seconds between restarts -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Log files -->
+    <key>StandardOutPath</key>
+    <string>/tmp/meshtastic-detection.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/meshtastic-detection.err</string>
+</dict>
+</plist>
