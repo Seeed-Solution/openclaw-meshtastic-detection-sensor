@@ -51,6 +51,8 @@ Remote Sensor Device              Host Machine (macOS/Linux/RPi)
 ./venv/bin/python scripts/usb_receiver.py --port /dev/cu.usbmodem1CDBD4A896441
 #    Linux/RPi:
 ./venv/bin/python scripts/usb_receiver.py --port /dev/ttyUSB0
+#    Docker (inside container):
+./entrypoint.sh
 
 # 3. Check for alerts (in another terminal)
 ./venv/bin/python scripts/event_monitor.py
@@ -60,7 +62,7 @@ Remote Sensor Device              Host Machine (macOS/Linux/RPi)
 ./venv/bin/python scripts/sensor_cli.py stats --since 1h
 ```
 
-需要飞书告警时，按下方 **「OpenClaw Cron Alert (feishu)」** 配置定时任务即可。
+If you need Feishu alerts, follow the **"OpenClaw Cron Alert (feishu)"** section below to configure a cron job.
 
 ## Install as System Service
 
@@ -88,17 +90,17 @@ launchctl unload ~/Library/LaunchAgents/com.openclaw.meshtastic-detection.plist
 
 **Docker (entrypoint.sh):**
 
-容器内没有 systemd，`setup.sh` 检测到 Docker 后会生成 `entrypoint.sh`，它内置自动重启循环。
+There is no systemd inside the container. When `setup.sh` detects Docker, it generates `entrypoint.sh`, which contains a simple auto-restart loop.
 
-方式一：在已运行的容器内后台启动
+Option 1: run in background inside an already running container
 ```bash
 nohup ./entrypoint.sh > data/entrypoint.log 2>&1 &
 
-# 查看日志
+# Tail logs
 tail -f data/entrypoint.log
 ```
 
-方式二：作为容器主进程（推荐，由 Docker 管理重启）
+Option 2: use as the main container process (recommended, letting Docker manage restarts)
 
 ```yaml
 # docker-compose.yml
@@ -148,11 +150,11 @@ No manual cleanup needed.
 
 ## OpenClaw Cron Alert (feishu)
 
-配置后，定时任务每分钟执行一次 `event_monitor.py`；若有新告警，OpenClaw 会通过飞书推送给你。
+After configuration, the cron job will run `event_monitor.py` every minute; if there are new alerts, OpenClaw will push them to Feishu.
 
-### 1. 添加定时任务
+### 1. Create a cron job
 
-在项目根目录执行（将 `<项目路径>` 换成实际路径，如 `/Users/you/.openclaw/skills/meshtastic-detection`；将 `<your-feishu-open-id>` 换成你的飞书 open_id）：
+From the project root, run the following (replace `<PROJECT_PATH>` with your real path, e.g. `/Users/you/.openclaw/skills/meshtastic-detection`, and `<your-feishu-open-id>` with your Feishu open_id):
 
 ```bash
 openclaw cron add \
@@ -160,32 +162,81 @@ openclaw cron add \
   --every 1m \
   --session isolated \
   --timeout-seconds 60 \
-  --message "Run this command and report the output: cd <项目路径> && ./venv/bin/python scripts/event_monitor.py — If alert_count > 0, tell me how many alerts, the latest sender and time. If alert_count is 0, reply: 暂无新告警。" \
+  --message "Run this command and report the output: cd <PROJECT_PATH> && ./venv/bin/python scripts/event_monitor.py — If alert_count > 0, tell me how many alerts there are, and the latest sender and time. If alert_count is 0, reply: No new alerts." \
   --announce \
   --channel feishu \
   --to <your-feishu-open-id>
 ```
 
-参数说明：
-- `--every 1m`：每 1 分钟执行一次
-- `--timeout-seconds 60`：单次执行超时 60 秒（跑脚本 + 发消息需要约 20–40 秒）
-- `--channel feishu`：通过飞书发送
-- `--to <open-id>`：飞书接收人的 open_id（必填，否则收不到消息）
+Notes:
+- `--every 1m`: run every 1 minute
+- `--timeout-seconds 60`: per-run timeout in seconds (running the script + sending the message usually takes ~20–40 seconds)
+- `--channel feishu`: send via Feishu
+- `--to <open-id>`: Feishu receiver open_id (required, otherwise no messages are delivered)
 
-### 2. 验证是否生效
+### 2. Verify it works
 
 ```bash
-# 查看所有定时任务
+# List all cron jobs
 openclaw cron list
 
-# 手动触发一次（把 <job-id> 换成列表里的 ID）
+# Trigger once manually (replace <job-id> with the ID from the list)
 openclaw cron run <job-id>
 
-# 查看该任务的执行历史
+# View the run history for this job
 openclaw cron runs --id <job-id>
 ```
 
-若飞书收不到消息：检查 `--to` 是否填了正确的飞书用户 open_id；超时可把 `--timeout-seconds` 调大。
+If Feishu does not receive messages: check that `--to` is set to the correct Feishu user open_id; if it times out, increase `--timeout-seconds`.
+
+### 3. Container cron job (JSON structure)
+
+The following describes the equivalent configuration for `sensor-monitor`, for viewing, debugging, or recreating jobs in the container or platform.
+
+**Project path in container** (differs from local):
+
+- In container: `/home/node/.openclaw/workspace/skills/meshtastic-detection/`
+- Local: `<PROJECT_PATH>` (e.g. `/Users/you/.openclaw/skills/meshtastic-detection`)
+
+**Key JSON fields**:
+
+| Field | Description |
+|-------|-------------|
+| `jobs[].name` | Job name, e.g. `sensor-monitor` |
+| `jobs[].schedule.kind` | `"every"` = run at fixed interval |
+| `jobs[].schedule.everyMs` | Interval in ms, e.g. `60000` = 1 minute |
+| `jobs[].sessionTarget` | `"isolated"` = isolated session |
+| `jobs[].payload.kind` | `"agentTurn"` = Agent executes the instruction |
+| `jobs[].payload.message` | Full instruction for the Agent (see template below) |
+| `jobs[].payload.timeoutSeconds` | Per-run timeout in seconds, e.g. `60` |
+| `jobs[].delivery.mode` | `"silent"` = run only, no platform delivery; for Feishu, the message instructs the Agent to use the message tool |
+
+**Recommended payload.message template** (Feishu alert + heartbeat):
+
+```text
+Run detection task: cd /home/node/.openclaw/workspace/skills/meshtastic-detection/ && ./venv/bin/python scripts/event_monitor.py
+
+Based on the output:
+- If alert_count > 0: Use the message tool to send an alert to Feishu (target: user:<feishu-open-id>), in this format:
+
+🚨 **Meshtastic Detection Alert**
+📊 **Count**: X new alert(s)
+📡 **Source node**: sender_id
+📍 **Latest time**: timestamp
+📝 **Content**: alert text
+
+- If alert_count = 0: Reply HEARTBEAT_OK (do not send a message)
+
+Important: You must use the message tool with action=send to send the message to Feishu.
+```
+
+Replace `<feishu-open-id>` with the recipient's Feishu open_id (e.g. `ou_9b2c3a662d7a314f2d9a3a893f29cc3c`).
+
+**state fields** (runtime status, read-only):
+
+- `nextRunAtMs` / `lastRunAtMs`: Next/last run time (ms timestamp)
+- `lastRunStatus`: `"ok"` or error message
+- `lastDeliveryStatus` / `lastDeliveryError`: If platform delivery fails, check here; in the container, alerts often rely on the payload message instructing the Agent to use the message tool to send to Feishu.
 
 ## File Structure
 
@@ -231,20 +282,20 @@ meshtastic-detection/
 
 ## Troubleshooting
 
-**Docker 内运行 setup.sh：ensurepip 不可用 / 无 root**
-- `setup.sh` 会先尝试创建「无 pip」的 venv，再用 get-pip.py 安装 pip，**不依赖 apt**，适合无 root 的容器。
-- 若仍失败，请使用带完整 venv 的镜像（如 `python:3.11`）或以 root 在镜像内先执行：`apt update && apt install -y python3.11-venv`。
+**Docker: running setup.sh when ensurepip is unavailable / no root**
+- `setup.sh` first tries to create a venv without pip and then installs pip via get-pip.py, **without relying on apt**, suitable for containers without root.
+- If it still fails, use an image that already includes venv support (e.g. `python:3.11`), or run inside the image as root: `apt update && apt install -y python3.11-venv`.
 
-**Docker 串口访问（/dev/ttyACM0 权限问题）**
-- 在宿主机将设备挂载进容器：
+**Docker serial access (/dev/ttyACM0 permission issues)**
+- On the host, mount the device into the container:
   - `docker run --device /dev/ttyACM0:/dev/ttyACM0 ...`
-  - 或在 compose 中：
+  - Or in docker-compose:
     - `devices:`
       - `/dev/ttyACM0:/dev/ttyACM0`
-- 若仍报 `Permission denied`，可以临时使用特权容器（测试环境推荐）：
+- If you still get `Permission denied`, you can temporarily run a privileged container (recommended only for testing):
   - `docker run --privileged ...`
-  - 或在 compose 中：`privileged: true`
-- 生产环境更安全的做法是只挂载需要的设备，并避免长期使用 `privileged: true`。
+  - Or in docker-compose:`privileged: true`
+- In production, a safer approach is to mount only the required devices and avoid using `privileged: true` long term.
 
 **Raspberry Pi / Debian: ensurepip not available**
 - `setup.sh` will auto-detect and install the missing `python3.X-venv` package via apt.
