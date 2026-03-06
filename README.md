@@ -11,10 +11,20 @@ An OpenClaw skill that connects to a Meshtastic LoRa device via USB to receive `
 - **Alert** immediately via feishu through OpenClaw cron
 - **Query** through OpenClaw conversation or CLI
 
+## Supported Platforms
+
+| Platform | Serial port pattern | Service manager |
+|----------|-------------------|-----------------|
+| macOS | `/dev/cu.usbmodem*` | launchd (plist) |
+| Linux x86/arm | `/dev/ttyUSB*`, `/dev/ttyACM*` | systemd |
+| Raspberry Pi | `/dev/ttyUSB*`, `/dev/ttyACM*` | systemd |
+
+`setup.sh` auto-detects your platform and handles all differences.
+
 ## Architecture
 
 ```
-Remote Sensor Device              Host Machine (macOS/Linux)
+Remote Sensor Device              Host Machine (macOS/Linux/RPi)
 [GPIO Detection Sensor]           [Meshtastic Module via USB]
         |                                  |
         | LoRa radio                  usb_receiver.py (daemon)
@@ -32,11 +42,14 @@ Remote Sensor Device              Host Machine (macOS/Linux)
 ## Quick Start
 
 ```bash
-# 1. One-click setup (auto-detects Python 3.10+ and serial port)
+# 1. One-click setup (auto-detects platform, Python, serial port)
 ./setup.sh
 
 # 2. Start receiver (Ctrl+C to stop)
+#    macOS:
 ./venv/bin/python scripts/usb_receiver.py --port /dev/cu.usbmodem1CDBD4A896441
+#    Linux/RPi:
+./venv/bin/python scripts/usb_receiver.py --port /dev/ttyUSB0
 
 # 3. Check for alerts (in another terminal)
 ./venv/bin/python scripts/event_monitor.py
@@ -44,6 +57,30 @@ Remote Sensor Device              Host Machine (macOS/Linux)
 # 4. Query historical data
 ./venv/bin/python scripts/sensor_cli.py latest
 ./venv/bin/python scripts/sensor_cli.py stats --since 1h
+```
+
+## Install as System Service
+
+`setup.sh` automatically generates a service file for your platform. Follow the output instructions, or:
+
+**Linux / Raspberry Pi (systemd):**
+```bash
+sudo cp meshtastic-detection.generated.service /etc/systemd/system/meshtastic-detection.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now meshtastic-detection
+
+# Check status
+sudo systemctl status meshtastic-detection
+sudo journalctl -u meshtastic-detection -f
+```
+
+**macOS (launchd):**
+```bash
+cp com.openclaw.meshtastic-detection.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.openclaw.meshtastic-detection.plist
+
+# Uninstall
+launchctl unload ~/Library/LaunchAgents/com.openclaw.meshtastic-detection.plist
 ```
 
 ## Components
@@ -105,35 +142,50 @@ meshtastic-detection/
 ├── SKILL.md                      # AI agent instructions (with metadata gating)
 ├── CONFIG.md                     # User configuration
 ├── README.md                     # This file
-├── setup.sh                      # One-click setup script
+├── setup.sh                      # One-click setup (macOS/Linux/RPi)
 ├── requirements.txt              # Python dependencies
-├── .gitignore                    # Excludes venv/ and data/ runtime files
+├── .gitignore
 ├── scripts/
-│   ├── usb_receiver.py           # USB serial daemon (DETECTION_SENSOR_APP only)
+│   ├── usb_receiver.py           # USB serial daemon
 │   ├── event_monitor.py          # Incremental alert monitor
 │   └── sensor_cli.py             # Query CLI
-├── data/                         # Runtime data (auto-rotated, git-ignored)
-│   ├── sensor_data.jsonl         # Current detection records
-│   ├── sensor_data.jsonl.1       # Archive (previous rotation)
-│   ├── sensor_data.jsonl.2       # Archive (oldest, auto-deleted)
-│   ├── latest.json               # Most recent detection
-│   └── monitor_state.json        # Monitor byte offset + seen hashes
+├── data/                         # Runtime data (git-ignored)
+│   ├── sensor_data.jsonl
+│   ├── sensor_data.jsonl.1       # Archive
+│   ├── sensor_data.jsonl.2       # Archive
+│   ├── latest.json
+│   └── monitor_state.json
 ├── docs/
-│   └── OPENCLAW_SKILLS_GUIDE.md  # OpenClaw Skills 配置与发布指南
+│   └── OPENCLAW_SKILLS_GUIDE.md
 └── references/
     ├── SETUP.md                  # Detailed installation guide
-    └── meshtastic-detection.service # systemd template (Linux)
+    ├── meshtastic-detection.service                # systemd template (Linux/RPi)
+    └── com.openclaw.meshtastic-detection.plist     # launchd template (macOS)
 ```
 
 ## Dependencies
 
 - `meshtastic>=2.0` -- Meshtastic Python API
 - `pypubsub` -- Pubsub for serial event handling
-- Python 3.10+ (macOS users: use `python3.12`, not the system `python3`)
+- Python 3.10+
+
+| Platform | Install Python |
+|----------|---------------|
+| macOS | `brew install python@3.12` |
+| Raspberry Pi | `sudo apt install python3.11 python3.11-venv` |
+| Ubuntu/Debian | `sudo apt install python3.12 python3.12-venv` |
 
 ## Troubleshooting
 
-**venv install fails with pyobjc-core error**
+**Raspberry Pi / Debian: ensurepip not available**
+- `setup.sh` will auto-detect and install the missing `python3.X-venv` package via apt.
+- If auto-install fails, run manually: `sudo apt install python3.11-venv` (replace `3.11` with your Python version).
+
+**Raspberry Pi: serial port permission denied**
+- Add your user to the `dialout` group: `sudo usermod -a -G dialout $USER`
+- Log out and back in (or reboot) for the change to take effect.
+
+**venv install fails with pyobjc-core error (macOS)**
 - You're using Python 3.9 (macOS default). Recreate with `python3.12 -m venv venv`.
 
 **Receiver runs but no detection events appear**
@@ -149,7 +201,9 @@ meshtastic-detection/
 - Set delivery target: `openclaw cron edit <id> --to <feishu-open-id>`.
 
 **Serial port busy**
-- Only one process can use the port. Check: `lsof /dev/cu.usbmodem*`.
+- Only one process can use the port.
+- macOS: `lsof /dev/cu.usbmodem*`
+- Linux/RPi: `lsof /dev/ttyUSB* /dev/ttyACM*`
 
 ## License
 

@@ -79,6 +79,7 @@ Edit `CONFIG.md` in the project root:
 
 Run the receiver manually to verify it captures detection events:
 
+
 ```bash
 python scripts/usb_receiver.py --port /dev/cu.usbmodem1CDBD4A896441
 ```

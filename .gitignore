@@ -15,6 +15,10 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Generated service files (setup.sh output, platform-specific)
+meshtastic-detection.generated.service
+com.openclaw.meshtastic-detection.plist
+
 # OS
 .DS_Store
 Thumbs.db
