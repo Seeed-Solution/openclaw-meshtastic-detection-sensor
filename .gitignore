@@ -21,6 +21,7 @@ __pycache__/
 # Generated service files (setup.sh output, platform-specific)
 meshtastic-detection.generated.service
 com.openclaw.meshtastic-detection.plist
+entrypoint.sh
 
 # OS
 .DS_Store

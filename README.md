@@ -18,8 +18,9 @@ An OpenClaw skill that connects to a Meshtastic LoRa device via USB to receive `
 | macOS | `/dev/cu.usbmodem*` | launchd (plist) |
 | Linux x86/arm | `/dev/ttyUSB*`, `/dev/ttyACM*` | systemd |
 | Raspberry Pi | `/dev/ttyUSB*`, `/dev/ttyACM*` | systemd |
+| Docker | `/dev/ttyUSB*`, `/dev/ttyACM*` | entrypoint.sh + `nohup` / container CMD |
 
-`setup.sh` auto-detects your platform and handles all differences.
+`setup.sh` auto-detects your platform (including Docker) and handles all differences.
 
 ## Architecture
 
@@ -83,6 +84,35 @@ launchctl load ~/Library/LaunchAgents/com.openclaw.meshtastic-detection.plist
 
 # Uninstall
 launchctl unload ~/Library/LaunchAgents/com.openclaw.meshtastic-detection.plist
+```
+
+**Docker (entrypoint.sh):**
+
+容器内没有 systemd，`setup.sh` 检测到 Docker 后会生成 `entrypoint.sh`，它内置自动重启循环。
+
+方式一：在已运行的容器内后台启动
+```bash
+nohup ./entrypoint.sh > data/entrypoint.log 2>&1 &
+
+# 查看日志
+tail -f data/entrypoint.log
+```
+
+方式二：作为容器主进程（推荐，由 Docker 管理重启）
+
+```yaml
+# docker-compose.yml
+services:
+  meshtastic:
+    image: your-image
+    working_dir: /app/skills/meshtastic-detection
+    command: ./entrypoint.sh
+    restart: always
+    privileged: true
+    devices:
+      - /dev/ttyACM0:/dev/ttyACM0
+    volumes:
+      - ./data:/app/skills/meshtastic-detection/data
 ```
 
 ## Components
@@ -183,7 +213,8 @@ meshtastic-detection/
 └── references/
     ├── SETUP.md                  # Detailed installation guide
     ├── meshtastic-detection.service                # systemd template (Linux/RPi)
-    └── com.openclaw.meshtastic-detection.plist     # launchd template (macOS)
+    ├── com.openclaw.meshtastic-detection.plist     # launchd template (macOS)
+    └── entrypoint.sh                              # Docker entrypoint template
 ```
 
 ## Dependencies
@@ -203,6 +234,17 @@ meshtastic-detection/
 **Docker 内运行 setup.sh：ensurepip 不可用 / 无 root**
 - `setup.sh` 会先尝试创建「无 pip」的 venv，再用 get-pip.py 安装 pip，**不依赖 apt**，适合无 root 的容器。
 - 若仍失败，请使用带完整 venv 的镜像（如 `python:3.11`）或以 root 在镜像内先执行：`apt update && apt install -y python3.11-venv`。
+
+**Docker 串口访问（/dev/ttyACM0 权限问题）**
+- 在宿主机将设备挂载进容器：
+  - `docker run --device /dev/ttyACM0:/dev/ttyACM0 ...`
+  - 或在 compose 中：
+    - `devices:`
+      - `/dev/ttyACM0:/dev/ttyACM0`
+- 若仍报 `Permission denied`，可以临时使用特权容器（测试环境推荐）：
+  - `docker run --privileged ...`
+  - 或在 compose 中：`privileged: true`
+- 生产环境更安全的做法是只挂载需要的设备，并避免长期使用 `privileged: true`。
 
 **Raspberry Pi / Debian: ensurepip not available**
 - `setup.sh` will auto-detect and install the missing `python3.X-venv` package via apt.

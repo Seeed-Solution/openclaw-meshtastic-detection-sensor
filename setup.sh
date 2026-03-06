@@ -38,7 +38,9 @@ detect_platform() {
       PLATFORM="macos"
       ;;
     Linux)
-      if [[ -f /proc/device-tree/model ]] && grep -qi "raspberry" /proc/device-tree/model 2>/dev/null; then
+      if [[ -f /.dockerenv ]] || grep -q 'docker\|containerd' /proc/1/cgroup 2>/dev/null; then
+        PLATFORM="docker"
+      elif [[ -f /proc/device-tree/model ]] && grep -qi "raspberry" /proc/device-tree/model 2>/dev/null; then
         PLATFORM="rpi"
       else
         PLATFORM="linux"
@@ -215,6 +217,33 @@ generate_service() {
       echo "    launchctl unload ~/Library/LaunchAgents/com.openclaw.meshtastic-detection.plist"
       ;;
 
+    docker)
+      local ep_template="$SCRIPT_DIR/references/entrypoint.sh"
+      local ep_out="$SCRIPT_DIR/entrypoint.sh"
+
+      if [[ ! -f "$ep_template" ]]; then
+        yellow "  Skipping entrypoint generation: template not found"
+        return
+      fi
+
+      sed \
+        -e "s|__INSTALL_DIR__|${install_dir}|g" \
+        -e "s|__SERIAL_PORT__|${port}|g" \
+        "$ep_template" > "$ep_out"
+      chmod +x "$ep_out"
+
+      info "Generated: entrypoint.sh (Docker background runner)"
+      echo ""
+      echo "  Inside container — run in background:"
+      echo "    nohup ./entrypoint.sh > data/entrypoint.log 2>&1 &"
+      echo ""
+      echo "  Or use as container CMD (docker-compose.yml):"
+      echo "    command: ./entrypoint.sh"
+      echo ""
+      echo "  Check logs:"
+      echo "    tail -f data/entrypoint.log"
+      ;;
+
     linux|rpi)
       local svc_template="$SCRIPT_DIR/references/meshtastic-detection.service"
       local svc_out="$SCRIPT_DIR/meshtastic-detection.generated.service"
@@ -231,26 +260,22 @@ generate_service() {
         "$svc_template" > "$svc_out"
 
       info "Generated: meshtastic-detection.generated.service"
-
-      # On Linux, offer to install the systemd service
-      if [[ "$PLATFORM" == "rpi" || "$PLATFORM" == "linux" ]]; then
-        echo ""
-        echo "  Install as systemd service:"
-        echo "    sudo cp meshtastic-detection.generated.service /etc/systemd/system/meshtastic-detection.service"
-        echo "    sudo systemctl daemon-reload"
-        echo "    sudo systemctl enable --now meshtastic-detection"
-        echo ""
-        echo "  Check status:"
-        echo "    sudo systemctl status meshtastic-detection"
-        echo "    sudo journalctl -u meshtastic-detection -f"
-      fi
+      echo ""
+      echo "  Install as systemd service:"
+      echo "    sudo cp meshtastic-detection.generated.service /etc/systemd/system/meshtastic-detection.service"
+      echo "    sudo systemctl daemon-reload"
+      echo "    sudo systemctl enable --now meshtastic-detection"
+      echo ""
+      echo "  Check status:"
+      echo "    sudo systemctl status meshtastic-detection"
+      echo "    sudo journalctl -u meshtastic-detection -f"
       ;;
   esac
 }
 
 generate_service
 
-# ── Step 8: Serial port permissions (Linux only) ──────────────
+# ── Step 8: Serial port permissions (bare-metal Linux only) ───
 if [[ "$PLATFORM" == "linux" || "$PLATFORM" == "rpi" ]]; then
   if ! groups 2>/dev/null | grep -q dialout; then
     echo ""
@@ -266,14 +291,22 @@ green "════════════════════════�
 green "  Setup complete!  ($PLATFORM)"
 green "═══════════════════════════════════════════"
 echo ""
-echo "  Start the receiver:"
-if [[ -n "$SERIAL_PORT" ]]; then
-  echo "    ./venv/bin/python scripts/usb_receiver.py --port $SERIAL_PORT"
+if [[ "$PLATFORM" == "docker" ]]; then
+  echo "  Run in background (inside container):"
+  echo "    nohup ./entrypoint.sh > data/entrypoint.log 2>&1 &"
+  echo ""
+  echo "  Or set as container CMD in docker-compose.yml:"
+  echo "    command: ./entrypoint.sh"
 else
-  case "$PLATFORM" in
-    macos) echo "    ./venv/bin/python scripts/usb_receiver.py --port /dev/cu.usbmodemXXXX" ;;
-    *)     echo "    ./venv/bin/python scripts/usb_receiver.py --port /dev/ttyUSB0" ;;
-  esac
+  echo "  Start the receiver:"
+  if [[ -n "$SERIAL_PORT" ]]; then
+    echo "    ./venv/bin/python scripts/usb_receiver.py --port $SERIAL_PORT"
+  else
+    case "$PLATFORM" in
+      macos) echo "    ./venv/bin/python scripts/usb_receiver.py --port /dev/cu.usbmodemXXXX" ;;
+      *)     echo "    ./venv/bin/python scripts/usb_receiver.py --port /dev/ttyUSB0" ;;
+    esac
+  fi
 fi
 echo ""
 echo "  Check alerts:"
