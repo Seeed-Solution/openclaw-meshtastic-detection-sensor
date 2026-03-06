@@ -18,10 +18,10 @@ __pycache__/
 # setup.sh temporary (bootstrap pip when ensurepip missing)
 .get-pip.py
 
-# Generated service files (setup.sh output, platform-specific)
-meshtastic-detection.generated.service
-com.openclaw.meshtastic-detection.plist
-entrypoint.sh
+# Generated service files (setup.sh output in project root, platform-specific)
+/meshtastic-detection.generated.service
+/com.openclaw.meshtastic-detection.plist
+/entrypoint.sh
 
 # OS
 .DS_Store
