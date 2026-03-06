@@ -59,6 +59,8 @@ Remote Sensor Device              Host Machine (macOS/Linux/RPi)
 ./venv/bin/python scripts/sensor_cli.py stats --since 1h
 ```
 
+需要飞书告警时，按下方 **「OpenClaw Cron Alert (feishu)」** 配置定时任务即可。
+
 ## Install as System Service
 
 `setup.sh` automatically generates a service file for your platform. Follow the output instructions, or:
@@ -116,23 +118,44 @@ No manual cleanup needed.
 
 ## OpenClaw Cron Alert (feishu)
 
-The cron job runs `event_monitor.py` every 60 seconds. If there are new detections, OpenClaw sends the alert to feishu.
+配置后，定时任务每分钟执行一次 `event_monitor.py`；若有新告警，OpenClaw 会通过飞书推送给你。
+
+### 1. 添加定时任务
+
+在项目根目录执行（将 `<项目路径>` 换成实际路径，如 `/Users/you/.openclaw/skills/meshtastic-detection`；将 `<your-feishu-open-id>` 换成你的飞书 open_id）：
 
 ```bash
-# Check cron status
-openclaw cron list
-
-# View run history
-openclaw cron runs --id <job-id>
-
-# Manual test run
-openclaw cron run <job-id>
+openclaw cron add \
+  --name "sensor-monitor" \
+  --every 1m \
+  --session isolated \
+  --timeout-seconds 60 \
+  --message "Run this command and report the output: cd <项目路径> && ./venv/bin/python scripts/event_monitor.py — If alert_count > 0, tell me how many alerts, the latest sender and time. If alert_count is 0, reply: 暂无新告警。" \
+  --announce \
+  --channel feishu \
+  --to <your-feishu-open-id>
 ```
 
-Key cron config that was needed:
-- `timeoutSeconds: 60` (agent needs ~20-40s to run script + compose message)
-- `delivery.to: ou_xxx` (feishu user open_id)
-- `delivery.channel: feishu`
+参数说明：
+- `--every 1m`：每 1 分钟执行一次
+- `--timeout-seconds 60`：单次执行超时 60 秒（跑脚本 + 发消息需要约 20–40 秒）
+- `--channel feishu`：通过飞书发送
+- `--to <open-id>`：飞书接收人的 open_id（必填，否则收不到消息）
+
+### 2. 验证是否生效
+
+```bash
+# 查看所有定时任务
+openclaw cron list
+
+# 手动触发一次（把 <job-id> 换成列表里的 ID）
+openclaw cron run <job-id>
+
+# 查看该任务的执行历史
+openclaw cron runs --id <job-id>
+```
+
+若飞书收不到消息：检查 `--to` 是否填了正确的飞书用户 open_id；超时可把 `--timeout-seconds` 调大。
 
 ## File Structure
 
