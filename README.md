@@ -200,6 +200,10 @@ meshtastic-detection/
 
 ## Troubleshooting
 
+**Docker 内运行 setup.sh：ensurepip 不可用 / 无 root**
+- `setup.sh` 会先尝试创建「无 pip」的 venv，再用 get-pip.py 安装 pip，**不依赖 apt**，适合无 root 的容器。
+- 若仍失败，请使用带完整 venv 的镜像（如 `python:3.11`）或以 root 在镜像内先执行：`apt update && apt install -y python3.11-venv`。
+
 **Raspberry Pi / Debian: ensurepip not available**
 - `setup.sh` will auto-detect and install the missing `python3.X-venv` package via apt.
 - If auto-install fails, run manually: `sudo apt install python3.11-venv` (replace `3.11` with your Python version).

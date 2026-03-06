@@ -84,27 +84,52 @@ info "Using Python: $PYTHON ($($PYTHON --version 2>&1))"
 if [[ ! -d venv ]]; then
   info "Creating virtual environment..."
 
-  if ! "$PYTHON" -m venv venv 2>/dev/null; then
+  VENV_CREATED=false
+
+  # 2a. Normal venv (with ensurepip)
+  if "$PYTHON" -m venv venv 2>/dev/null; then
+    VENV_CREATED=true
+  fi
+
+  # 2b. ensurepip 不可用时：先建无 pip 的 venv，再用 get-pip.py 装 pip（适用于 Docker 无 root）
+  if [[ "$VENV_CREATED" != "true" ]]; then
+    rm -rf venv
+    if "$PYTHON" -m venv venv --without-pip 2>/dev/null; then
+      yellow "venv created without pip; bootstrapping pip..."
+      GET_PIP="$SCRIPT_DIR/.get-pip.py"
+      if command -v curl &>/dev/null; then
+        curl -sSL https://bootstrap.pypa.io/get-pip.py -o "$GET_PIP"
+      elif command -v wget &>/dev/null; then
+        wget -q -O "$GET_PIP" https://bootstrap.pypa.io/get-pip.py
+      else
+        "$PYTHON" -c "import urllib.request; urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py', '$GET_PIP')"
+      fi
+      ./venv/bin/python "$GET_PIP"
+      rm -f "$GET_PIP"
+      VENV_CREATED=true
+    fi
+  fi
+
+  # 2c. 仍失败时，在 Debian/Ubuntu 上尝试 apt 安装 python3.X-venv（需 root）
+  if [[ "$VENV_CREATED" != "true" ]]; then
+    rm -rf venv
     py_minor=$("$PYTHON" -c "import sys; print(sys.version_info.minor)")
     venv_pkg="python3.${py_minor}-venv"
 
     if command -v apt &>/dev/null; then
-      yellow "ensurepip not available — installing $venv_pkg ..."
-      if command -v sudo &>/dev/null; then
-        sudo apt-get update -qq && sudo apt-get install -y -qq "$venv_pkg"
-      else
-        apt-get update -qq && apt-get install -y -qq "$venv_pkg"
+      yellow "ensurepip not available — trying: sudo apt install $venv_pkg ..."
+      if (command -v sudo &>/dev/null && sudo apt-get update -qq && sudo apt-get install -y -qq "$venv_pkg") 2>/dev/null; then
+        if "$PYTHON" -m venv venv; then
+          VENV_CREATED=true
+        fi
       fi
+    fi
 
-      if ! "$PYTHON" -m venv venv; then
-        red "Error: venv creation still failed after installing $venv_pkg"
-        echo "  Try manually: sudo apt install $venv_pkg"
-        exit 1
-      fi
-    else
-      red "Error: Python venv module not available."
-      echo "  Debian/Raspberry Pi: sudo apt install $venv_pkg"
-      echo "  Fedora: sudo dnf install python3-virtualenv"
+    if [[ "$VENV_CREATED" != "true" ]]; then
+      red "Error: Could not create virtual environment."
+      echo "  • Docker: use an image with venv (e.g. python:3.11) or run as root and install: apt install $venv_pkg"
+      echo "  • Debian/Ubuntu: sudo apt install $venv_pkg"
+      echo "  • Fedora: sudo dnf install python3-virtualenv"
       exit 1
     fi
   fi
